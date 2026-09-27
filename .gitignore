@@ -1,0 +1,18 @@
+# 依赖与产物
+node_modules/
+*.tgz
+dsh-llamacpp-bridge-*.tgz
+.pnpm-store/
+# 说明：dist/ 有意纳入版本控制（见 README「安装 → 从源码」），以便 clone 后可直接安装。
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.cnpmrc.local

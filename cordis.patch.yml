@@ -1,0 +1,6 @@
+# dsh-llamacpp-bridge bundle patch（package.json#dsh.bundle 要求的加载配置）
+# 单包单插件：一个 entry，name = 包名，loader 以该 specifier import() 本包并
+# 调用其导出的 apply(ctx, config)。config 可在此覆盖默认值（可选）。
+- insert:
+    - id: dsh-llamacpp-bridge
+      name: dsh-llamacpp-bridge

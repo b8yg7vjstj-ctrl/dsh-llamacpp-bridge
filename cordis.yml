@@ -1,0 +1,27 @@
+# llama.cpp Bridge —— 挂载示例（cordis 组合行）
+#
+# 真实双端包：host 入口 = 包主入口（exports["."]，src/host/index.ts 编译产物
+# dist/host/index.js），浏览器入口 = exports["./client"]（dist/client/index.js），
+# 浏览器加载依赖在 package.json#dsh.client 声明。此处仅给出可在 DSH 组合配置中
+# 引用的行 + 参数注释，具体装载方式以 DSH 插件装载器为准。
+
+- id: dsh-llamacpp-bridge
+  name: llama.cpp Bridge
+  description: 本地 llama-server 进程管理 + llamacpp provider 路由（选模型自动起服/切换先卸载再加载）
+
+  # —— 可选 entry 级配置（有 settings 服务时可在 llamacpp-bridge: 节覆盖）——
+  # displayName: Local llama.cpp
+  # executable: llama-server
+  # modelsDir: ~/models
+  # host: 127.0.0.1
+  # port: 8080
+  # strategy: auto             # auto(自动) | single(单模型直启) | router(llama.cpp router，免重启切换；需较新 llama-server)
+  # contextLength: 0
+  # autoContext: false
+  # gpuLayers: -1
+  # mmprojSuffix: -mmproj.gguf
+  # additionalArgs: []
+  # startTimeoutMs: 120000
+  # debug: false
+
+  # 注意：不要在 llm-pi-ai.providers 里另配名为 llamacpp 的 profile（路由冲突）。

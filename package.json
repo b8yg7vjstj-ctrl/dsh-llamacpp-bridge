@@ -1,0 +1,87 @@
+{
+  "name": "dsh-llamacpp-bridge",
+  "description": "DeepSeek Harness plugin that turns a local llama.cpp (llama-server) into a first-class model provider: process & router management, model catalog sync with mmproj vision pairing, auto-start on demand, stop-then-load model switching, and a sidebar terminal-output monitor panel.",
+  "version": "1.5.0",
+  "type": "module",
+  "main": "./dist/host/index.js",
+  "types": "./dist/host/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/host/index.d.ts",
+      "default": "./dist/host/index.js"
+    },
+    "./client": {
+      "default": "./dist/client/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "llama.cpp",
+    "llama-server",
+    "gguf",
+    "mmproj",
+    "local-ai",
+    "local-llm",
+    "llm",
+    "vision",
+    "openai-compatible"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.3.7",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "link:dsh": "node scripts/link-dsh-types.mjs",
+    "typecheck": "npm run typecheck:host && npm run typecheck:client",
+    "typecheck:host": "tsc -p tsconfig.host.json --noEmit",
+    "typecheck:client": "tsc -p tsconfig.client.json --noEmit",
+    "check": "npm run typecheck && npm run build",
+    "build": "npm run build:host && npm run build:client",
+    "build:host": "tsc -p tsconfig.host.json",
+    "build:client": "esbuild src/client/index.tsx --bundle --format=cjs --platform=browser --jsx=transform --external:react --external:react-dom/client --outfile=dist/client/bundle.cjs && node scripts/wrap-client.mjs",
+    "pack": "npm pack"
+  },
+  "author": "b8yg7vjstj-ctrl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b8yg7vjstj-ctrl/dsh-llamacpp-bridge.git"
+  },
+  "homepage": "https://github.com/b8yg7vjstj-ctrl/dsh-llamacpp-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/b8yg7vjstj-ctrl/dsh-llamacpp-bridge/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
