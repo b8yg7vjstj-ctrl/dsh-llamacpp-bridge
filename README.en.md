@@ -6,7 +6,7 @@
 
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![platform](https://img.shields.io/badge/platform-web%20profile-blue)
-![dsh](https://img.shields.io/badge/DSH-web%20profile-6f42c1)
+![dsh](https://img.shields.io/badge/DSH-plugin-6f42c1)
 ![llama.cpp](https://img.shields.io/badge/llama.cpp-llama--server-orange)
 ![node](https://img.shields.io/badge/node-%3E%3D20-339933)
 
@@ -63,7 +63,7 @@ Behavioral tests (real child processes and real file systems) cover: switching o
 
 | Item | Requirement |
 |---|---|
-| DSH | `web` profile. Note: `0.1.7-rc.2` is defective — DSH does not load the plugin client bundle there (no UI), which is unrelated to this plugin |
+| DSH | `web` profile (a build that loads plugin client bundles correctly) |
 | Node | ≥ 20 |
 | llama.cpp | A build that provides `llama-server` (router mode needs a recent build; single-model mode works on older ones) |
 | Platform | macOS / Linux (verified on Apple Silicon); Windows untested |
@@ -255,7 +255,6 @@ Read this before changing the code — every item below was an actual failure:
 ## Compatibility
 
 - **Environment**: DSH `web` profile, macOS (Apple Silicon), `llama-server` in both single-model and router modes.
-- **Known DSH-side issue**: on `0.1.7-rc.2` DSH does not load the plugin client bundle (`/plugins/<pkg>/client.js` returns 404 and the host log shows no plugin-side error), so the UI is invisible; the host half of the same package works (its routes are live). Use a DSH build without this defect.
 - **Types**: minimal structural types keep the build working across DSH type revisions; type packages are linked from a local DSH install via `npm run link:dsh`.
 - **Runtime**: the host entry must be resolvable inside the DSH profile (installing with `dsh plugin add` satisfies this).
 - **Windows**: untested; terminal primitives and signal semantics differ (`gracefulStop` falls back to piped mode automatically).
@@ -266,7 +265,7 @@ Read this before changing the code — every item below was an actual failure:
 
 | Symptom | What to do |
 |---|---|
-| Nothing visible at all on 0.1.7-rc.2 | That DSH build never loads the client bundle (`/plugins/dsh-llamacpp-bridge/client.js` is 404) — a DSH-side issue, not a plugin error; use a working build |
+| No entry row and no settings page at all | First check that the client half was loaded: `/plugins/dsh-llamacpp-bridge/client.js` should return 200; a 404 means the current DSH build did not mount the plugin client half |
 | No sidebar entry row | Make sure the plugin is installed (`dsh plugin add` writes `bundles` for you) → **restart the host** → hard-refresh the browser (`Cmd/Ctrl+Shift+R`) |
 | `bundle script /plugins/... failed to load` | Stale page cache: hard-refresh, or quit the app entirely (`Cmd+Q`) and reopen |
 | Clicking the entry row does nothing | Open the F12 console and look for lines starting with `[llamacpp-bridge]` or `slot entry crashed` |

@@ -6,7 +6,7 @@
 
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![platform](https://img.shields.io/badge/platform-web%20profile-blue)
-![dsh](https://img.shields.io/badge/DSH-web%20profile-6f42c1)
+![dsh](https://img.shields.io/badge/DSH-plugin-6f42c1)
 ![llama.cpp](https://img.shields.io/badge/llama.cpp-llama--server-orange)
 ![node](https://img.shields.io/badge/node-%3E%3D20-339933)
 
@@ -63,7 +63,7 @@ DeepSeek Harness（DSH）默认使用云端模型。本插件让你把**本机�
 
 | 项目 | 要求 |
 |---|---|
-| DSH | `web` profile。注意：`0.1.7-rc.2` 该版本本身有缺陷——DSH 不会加载插件的客户端 bundle（界面不可见），与本插件无关 |
+| DSH | `web` profile（需要能正常加载插件客户端半包的版本） |
 | Node | ≥ 20 |
 | llama.cpp | 提供 `llama-server`（router 模式需较新版本；单模型模式老版本亦可） |
 | 平台 | macOS / Linux（Apple Silicon 已验证）；Windows 未验证 |
@@ -255,7 +255,6 @@ DSH_INSTALL=/opt/homebrew/lib/node_modules/@deepseek-ai/dsh npm run link:dsh
 ## 兼容性
 
 - **环境**：DSH `web` profile + macOS（Apple Silicon）+ `llama.cpp` 的 `llama-server`（单模型与 router 两种模式）。
-- **已知 DSH 侧问题**：`0.1.7-rc.2` 下 DSH 不加载插件的客户端 bundle（`/plugins/<包名>/client.js` 返回 404，宿主日志无插件侧报错），因此界面不可见；同一个包里 host 半包工作正常（路由可用）。请使用无此缺陷的 DSH 版本。
 - **类型层**：对 DSH 接口采用最小结构类型，可在 DSH 类型修订之间继续编译；类型包由 `npm run link:dsh` 从本机安装链接。
 - **运行期**：host 入口必须能在 DSH profile 内解析（用 `dsh plugin add` 安装即可满足）。
 - **Windows**：未验证；终端原语与信号语义不同（`gracefulStop` 会自动回退管道模式）。
@@ -266,7 +265,7 @@ DSH_INSTALL=/opt/homebrew/lib/node_modules/@deepseek-ai/dsh npm run link:dsh
 
 | 现象 | 处理 |
 |---|---|
-| 0.1.7-rc.2 上完全看不到入口/设置页 | 该版本 DSH 未加载客户端 bundle（`/plugins/dsh-llamacpp-bridge/client.js` 为 404），属 DSH 侧问题，非本插件报错；换用可用版本 |
+| 界面完全没有入口行与设置页 | 先确认客户端半包已被加载：`/plugins/dsh-llamacpp-bridge/client.js` 应返回 200；若为 404，说明当前 DSH 版本没有装载插件的客户端半包 |
 | 侧边栏没有入口行 | 确认插件已安装（`dsh plugin add` 已自动写入 `bundles`）→ **重启 host** → 浏览器 `Cmd/Ctrl+Shift+R` |
 | `bundle script /plugins/... failed to load` | 旧页面缓存：强制刷新，或 `Cmd+Q` 整退出后重开 |
 | 入口行点了没反应 | 打开 F12 Console，找 `[llamacpp-bridge]` 或 `slot entry crashed` 开头的行 |
