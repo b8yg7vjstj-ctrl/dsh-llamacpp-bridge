@@ -1,308 +1,222 @@
 # dsh-llamacpp-bridge
 
-> 把本地 **llama.cpp（llama-server）** 变成 DeepSeek Harness 的一等模型 Provider：进程与路由管理、模型目录同步、按需自动启动、**先停旧再起新**的模型切换，以及侧边栏「llama.cpp 终端输出监控」面板。
+> 让你电脑里的 llama.cpp，像云端模型一样出现在 DSH 的模型列表里。
 
 [English](README.en.md) | **中文**
 
 ![license](https://img.shields.io/badge/license-MIT-green)
-![platform](https://img.shields.io/badge/platform-web%20profile-blue)
-![dsh](https://img.shields.io/badge/DSH-plugin-6f42c1)
+![platform](https://img.shields.io/badge/platform-DSH%20web%20profile-blue)
 ![llama.cpp](https://img.shields.io/badge/llama.cpp-llama--server-orange)
 ![node](https://img.shields.io/badge/node-%3E%3D20-339933)
 
 ---
 
-## 这是什么
+## 先说它在解决什么
 
-DeepSeek Harness（DSH）默认使用云端模型。本插件让你把**本机的 llama.cpp** 接入进来：在 DSH 的模型选择器里直接选 `llamacpp` 分组下的本地 GGUF 模型，发消息时自动拉起 `llama-server`，并把视觉投影文件（mmproj）、上下文长度、GPU 层数等一并交代清楚。
+如果本机已经有一份 llama.cpp 和几个 GGUF 模型，平时用起来大概是这样的：开一个终端，敲一长串参数，等模型慢慢加载进显存，然后回到另一个界面里把接口地址和模型名对一遍；想换个模型，上面这套从头再来；模型文件夹里加了一个，还得记得把列表也改一下。
 
-插件是标准的 DSH **双包插件**（host + client）：
+这个插件就是把这些杂事接过来。模型列表直接从你的模型目录里读；你选好模型发出第一条消息时，它负责把 `llama-server` 拉起来，并等到真正就绪才让请求出去；要换模型，它先把旧的停下来，再起新的；跑起来的日志、当前状态、用了哪个模型，在侧边栏的一个面板里都能看到。
 
-- **host**（Node ESM）：注册 `llamacpp` 模型路由、管理 `llama-server` 子进程、同步模型目录、提供同源 HTTP/SSE 数据面；
-- **client**（浏览器 bundle）：侧边栏入口行 + 自持面板 + 设置页图形引导。
+你要做的只有一件事：把 GGUF 放进文件夹。
 
----
+## 用起来大概是这样
 
-## 特性
+装好、重启 DSH 之后，侧边栏「新会话」下面会多出一行 **「llama.cpp 终端输出监控」**——线条画的终端图标，和任务看板排在同一个位置。
 
-| 能力 | 说明 |
-|---|---|
-| **模型路由** | 注册 `llamacpp` provider，与云端 provider 并存；只拥有自己的路由，不干扰其它 provider 的模型订阅 |
-| **按需自动启动** | 调用前 `ensure(model)`：服务器没跑就先跑起来，就绪后才走 OpenAI 兼容端口 |
-| **先停旧再起新** | 切换模型时**先把先前模型停下来**，再启动目标模型（日志会写明这两步），避免显存里同时挂着两个模型 |
-| **两种运行模式** | 单模型直启（`-m <model>`）与 router 模式（`--models-dir` + `/models/load`、`/models/unload` 动态装卸） |
-| **目录同步** | 启动全量重扫 + 读取时按目录指纹按需重扫 + `fs.watch` + 兜底轮询；目录稍后才出现也能自愈监听 |
-| **mmproj 视觉配对** | 三级配对：手动绑定 → 后缀约定 `<模型名>-mmproj.gguf` → **前缀模糊配对** `mmproj-*.gguf`（按归一化名打分）；配上就自动带 `--mmproj` |
-| **终端输出监控面板** | 侧边栏入口行（与任务看板同级）→ 自持面板：实时 SSE 日志、流别标签、时间戳、关键字过滤、清屏、模型切换、刷新 |
-| **优雅退出** | 面板按钮走真终端交互：**Ctrl+C（SIGINT 到前台进程组）→ 发送 Y 确认** → 等退出；不直接强杀（详见下文） |
-| **图形化引导** | 设置页自动探测 `~/llama.cpp/build/bin` 等位置，列出候选可执行文件与模型目录，也可手动浏览选择 |
-| **显示名截断** | 模型显示名超过 **30 字符**自动截断为前 30 字符 + `...`（**id 保持完整**，不影响选择与调用） |
+第一次用先打开 **设置 → llama.cpp**。它会自己去常见的地方找 `llama-server` 和模型目录（比如 `~/llama.cpp/build/bin`、`~/llama.cpp/models`），找到了就列成候选让你确认，没找到也可以用浏览文件夹的方式手动指定。这一步只需要做一次。
 
----
+然后回到对话，在模型选择器里挑一个本地模型。你按下发送的那一刻，插件会在后台把服务器启动起来；等它就绪之后请求才真正发出去，所以在 DSH 里用起来和云端模型没什么区别。
 
-## P0–P3 需求覆盖
+想看它在干什么，点侧边栏那行入口，面板就展开了：上面是当前状态（模型、pid、上下文长度），中间是一排模型按钮（带视觉投影的会标一个 👁），下面是滚动的终端输出——`llama-server` 自己打印的每一行都在里面，带时间戳和来源标签。想换模型，点另一个按钮就行。
 
-| 项 | 状态 | 实现位置 |
-|---|---|---|
-| ① 后端模型切换（非启动脚本全量列表） | ✅ | `model-store` 扫描整个模型目录，与“启动脚本里的列表”解耦 |
-| ② Web UI 侧边栏入口（Ollama 风格图标 + 模型切换 + 终端输出） | ✅ | DOM 注入入口行 → 自持面板：模型切换 + SSE 实时日志 |
-| ③ 对话开始时自动启动 llama.cpp | ✅ | `adapter.stream()` → `server.ensure()`（真正连接端口前等待就绪） |
-| ④ 切换模型前先卸载旧模型 | ✅ | `ensure()`：先 `stop()` 旧模型并确认停止，再启动目标模型 |
-| ⑤ 不挂钩其它模型订阅 | ✅ | 仅 `llm.registerAdapter(['llamacpp'], …)` |
-| ⑥ 安装即生成模型配置 | ✅ | 自有设置命名空间 `llamacpp-bridge` + 发现命名空间（含模型/投影器配对情况） |
-| P1 目录新增模型自动同步 | ✅ | 启动重扫 + 指纹按需重扫 + `fs.watch` + 兜底轮询 |
-| P1 mmproj 与模型一同加载 | ✅ | 三级配对 + `--mmproj` 参数 |
-| P2 依显存设置上下文长度 | ✅ | `autoContext` + `pickContextLength` 启发式 |
-| P3 长上下文提示（会话内询问） | ⚠️ | 上下文长度可在设置页设定；“对话中询问”尚无官方交互缝，未实现 |
+看完点面板左上角的 **「← 返回会话」** 就回去了；点侧边栏任意一个会话、或者按 Esc，效果一样。
 
-行为测试（模拟真实子进程/文件系统）：模型切换顺序、目录增删即时反映、mmproj 配对与 `--mmproj` 参数、Ctrl+C → Y 退出流程、30 字符截断，均已逐项验证。
+## 装它
 
----
+前提是一份 DSH（`web` profile）、一份带 `llama-server` 的 llama.cpp，以及 Node 20 以上。
 
-## 环境要求
+### 从 Release 装（最省事）
 
-| 项目 | 要求 |
-|---|---|
-| DSH | `web` profile（需要能正常加载插件客户端半包的版本） |
-| Node | ≥ 20 |
-| llama.cpp | 提供 `llama-server`（router 模式需较新版本；单模型模式老版本亦可） |
-| 平台 | macOS / Linux（Apple Silicon 已验证）；Windows 未验证 |
-
----
-
-## 安装
-
-### 方式 A：从 Release 安装（推荐）
-
-到 Releases 页面下载 `dsh-llamacpp-bridge-<版本>.tgz`，然后：
+到 Releases 页面下载 `dsh-llamacpp-bridge-1.5.0.tgz`，然后：
 
 ```bash
 dsh plugin --profile web add ./dsh-llamacpp-bridge-1.5.0.tgz
 ```
 
-### 方式 B：从源码构建
+### 从源码装
 
-> `dist/` 已随仓库提供，只想用的话 clone 后 `npm pack` 即可，不必构建。
-
-需要重新构建时（`@deepseek-ai/*` 类型包不在 npm registry 上，随 DSH 本体提供，由脚本链接）：
+仓库里的 `dist/` 是构建好的产物，只想用的话克隆下来直接打包就行：
 
 ```bash
 git clone https://github.com/b8yg7vjstj-ctrl/dsh-llamacpp-bridge.git
 cd dsh-llamacpp-bridge
-
-npm install          # 1) 先装 devDependencies
-npm run link:dsh     # 2) 再链接本机 DSH 的类型包（顺序不可颠倒：npm install 会清掉未声明的链接）
-npm run check        # 3) 类型检查 + 构建
-npm pack             # 4) 产出 dsh-llamacpp-bridge-<版本>.tgz
-
-dsh plugin --profile web add ./dsh-llamacpp-bridge-*.tgz
+npm pack
+dsh plugin --profile web add ./dsh-llamacpp-bridge-1.5.0.tgz
 ```
 
-脚本探测不到 DSH 位置时可手动指定：
+想自己重新构建，就多两步。这里有个小前提：`@deepseek-ai/*` 这些类型包并不在 npm 上，它们跟着 DSH 本体一起安装，所以要先让脚本把它们链接到项目里来——**顺序不能颠倒**，因为 `npm install` 会把没有在 `package.json` 里声明的东西清掉：
+
+```bash
+npm install          # 1) 先装 devDependencies
+npm run link:dsh     # 2) 再把本机 DSH 的类型包链接进来
+npm run check        # 3) 类型检查 + 构建
+npm pack             # 4) 得到可安装的 tgz
+```
+
+脚本找不到 DSH 的位置时，可以手动告诉它：
 
 ```bash
 DSH_INSTALL=/opt/homebrew/lib/node_modules/@deepseek-ai/dsh npm run link:dsh
 ```
 
-### 安装后必做
+### 装完之后有两步不能省
 
-1. **重启 host**：`dsh plugin add` 只改磁盘，运行中的 host 不会热加载新插件
-   ```bash
-   lsof -nP -iTCP:3080 -sTCP:LISTEN   # 取 PID
-   kill <PID>
-   cd ~ && dsh web
-   ```
-2. **浏览器强制刷新**：`Cmd/Ctrl + Shift + R`（旧页面缓存会继续请求已被替换的 bundle，表现为 `bundle script ... failed to load`）
+第一，**重启 host**。`dsh plugin add` 只是把文件放到了磁盘上，正在运行的那个 DSH 不会自己把新插件加载进来：
 
-> `dsh plugin add` 会**自动维护** `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，无需手工添加。卸载：`dsh plugin --profile web remove dsh-llamacpp-bridge`。
-
----
-
-## 快速开始
-
-1. 按上面步骤安装并重启，打开 DSH。
-2. 侧边栏「新会话」下方出现入口行 **「llama.cpp 终端输出监控」**（线条终端图标，紧跟任务看板之后）。
-3. 首次使用进入 **设置 → llama.cpp**：确认自动探测到的 `llama-server` 可执行文件与模型目录（探测不到就手动选）。
-4. 在模型选择器里选 `llamacpp` 分组下的本地模型并直接发消息——插件会自动启动服务器，就绪后开始推理。
-5. 点侧边栏入口行打开面板：看实时日志、切换模型、点「刷新」重扫目录、点「优雅退出」走 Ctrl+C → Y 流程。
-
----
-
-## 模型切换语义（重要）
-
-切换模型时**不会**在旧模型还在跑的时候直接调用 OpenAI 端口。实际顺序：
-
-```
-[manager] 切换模型：先停止先前模型 <旧模型>（pid <pid>）
-[manager] 先前模型已停止，开始启动目标模型 <新模型>
-…（服务器就绪）…
-[manager] ready on http://127.0.0.1:8080 (single)
+```bash
+lsof -nP -iTCP:3080 -sTCP:LISTEN   # 看一眼 PID
+kill <PID>
+cd ~ && dsh web
 ```
 
-即 **先停旧、再起新**，然后才发起请求。router 模式下用 `/models/unload` + `/models/load` 完成等价流程。
+第二，**在浏览器里硬刷新**（`Cmd/Ctrl + Shift + R`）。如果页面还停在旧版本，它会继续去要一个已经被替换掉的脚本，控制台里就会冒出 `bundle script ... failed to load` 之类的报错——那不是插件坏了，刷新一下就好。
 
----
+顺带一提，`dsh plugin add` 会顺手把插件登记进 `dsh.profile.bundles`，不需要手动改 `package.json`；卸载就是反过来一条命令：
 
-## 配置
+```bash
+dsh plugin --profile web remove dsh-llamacpp-bridge
+```
 
-### 设置页（图形化引导）
+## 它到底管着哪些事
 
-**设置 → llama.cpp** 提供：
+**把服务器管起来。** 它支持两种跑法：一种一次只服务一个模型（`-m <模型>`），另一种是 router 模式（`--models-dir` 配合 `/models/load`、`/models/unload`，换模型不用重启进程）。用哪种由设置里的 `strategy` 决定，默认让它自己判断。启动后它会轮询 HTTP 端口，日志里出现 `ready on http://...` 才算就绪，请求才会往下走。
 
-- 可执行文件候选（自动探测 `~/llama.cpp/build/bin/release`、`build/bin`、`build`、`bin`、`~/llama.cpp` 及 `PATH`），可手动选择或浏览；
-- 模型目录候选（含 `.gguf` 计数），可手动选择或浏览；
-- **③ 视觉投影文件（mmproj）**：列出目录内所有投影文件及其配对结果，未配对的可在该行填入目标模型 id 完成绑定；
-- 高级项：端口、运行策略、GPU 层数、上下文长度/自动推断、mmproj 后缀、附加参数、启动超时、调试日志。
+**换模型先停旧的。** 这一点是刻意做成这样的：切换时它先停掉当前模型、确认确实停了，再去启动目标模型，两步都会写进日志。这样显存里不会同时挂着两个模型。
 
-### 设置命名空间 `llamacpp-bridge`
+**让模型列表跟着文件夹走。** 每次启动都会把整个目录重扫一遍（日志里那句 `scanned N model(s) ... (startup rescan)`）；之后的每次读取会比对目录的修改时间和条目数，变了就重扫，没变就直接用上次结果。磁盘上真发生变动时会通过 `fs.watch` 感知，另外还有 30 秒一次的兜底轮询，防止某些文件系统漏掉事件。如果目录一开始还不存在（比如外置盘还没挂上），它会每 5 秒重试一次，出现了就自动接上。面板里另有一个「刷新」按钮，随时可以手动重扫。
 
-| 字段 | 默认 | 说明 |
+**顺手把视觉投影文件配上。** 带视觉能力的 GGUF 需要一个 mmproj 文件才能看图，插件按三级去配：你在设置页手动绑定的最优先；其次是 `<模型名>-mmproj.gguf` 这种后缀命名；最后是 `mmproj-xxx.gguf` 这种前缀命名——它会先把两边的名字归一化（去掉量化精度、`it`、`instruct` 这类跟「是哪个模型」无关的词），再做包含匹配并打分，挑最像的那个。配上之后，启动参数里就会自动带上 `--mmproj`。信息太少、没法判断的（比如目录里只有一个 `mmproj-F32.gguf`），它不会硬猜，而是在启动日志里写一句 `unmatched mmproj: ...`，提醒你去设置页手动指定。
+
+**名字太长就截短显示。** 模型显示名超过 30 个字符时，列表里会显示成前 30 个字符加 `...`；真正的 id 不动，所以选择和调用都不受影响。鼠标停在按钮上能看到完整名字。
+
+## 设置里那些项
+
+**设置 → llama.cpp** 就是那块图形化界面：挑可执行文件、挑模型目录（都支持浏览文件夹）、给 mmproj 配绑定，以及改下面这些参数。保存后热生效，多数项不需要重启 DSH。
+
+| 字段 | 默认值 | 意思是 |
 |---|---|---|
-| `displayName` | `Local llama.cpp (bridge)` | provider 显示名 |
-| `executable` | `''` | `llama-server` 路径；留空 = 自动探测 |
-| `modelsDir` | `''` | 模型目录；留空 = 自动探测 |
-| `host` / `port` | `127.0.0.1` / `8080` | 服务监听地址与端口 |
+| `displayName` | `Local llama.cpp (bridge)` | 模型选择器里显示的名字 |
+| `executable` | 空 | `llama-server` 的路径，留空就自动探测 |
+| `modelsDir` | 空 | 模型目录，留空就自动探测 |
+| `host` / `port` | `127.0.0.1` / `8080` | 服务监听的地址和端口 |
 | `strategy` | `auto` | `auto` / `single` / `router` |
-| `contextLength` | — | `-c` 上下文长度 |
-| `autoContext` | `false` | 按显存自动推断上下文长度 |
-| `gpuLayers` | `-1` | `-ngl`，`-1` = 交给 llama.cpp |
-| `mmprojSuffix` | `-mmproj.gguf` | 后缀约定式投影文件名 |
-| `mmprojOverrides` | `{}` | 手动绑定 `{ 模型id: 投影文件名 }`（优先级最高） |
-| `additionalArgs` | `[]` | 追加给 `llama-server` 的参数 |
-| `startTimeoutMs` | `120000` | 启动就绪超时 |
-| `debug` | `false` | 打印实际执行参数等调试信息 |
+| `contextLength` | — | 传给 `-c` 的上下文长度 |
+| `autoContext` | `false` | 按可用显存推算上下文长度 |
+| `gpuLayers` | `-1` | 传给 `-ngl`，`-1` 表示交给 llama.cpp 决定 |
+| `mmprojSuffix` | `-mmproj.gguf` | 后缀式投影文件的命名约定 |
+| `mmprojOverrides` | 空 | 手动绑定，形如 `{ 模型id: 投影文件名 }` |
+| `additionalArgs` | 空 | 想额外塞给 `llama-server` 的参数 |
+| `startTimeoutMs` | `120000` | 等就绪的最长时间 |
+| `debug` | `false` | 把实际执行的命令行之类也打进日志 |
 
-### 发现命名空间 `llamacpp-bridge-discovery`（只读）
+另外还有一个只读的「发现」命名空间 `llamacpp-bridge-discovery`，里面装着启动时探测到的可执行文件、模型目录、模型清单和投影文件配对情况——设置页上显示的就是这些内容。
 
-启动探测结果，供设置页展示：`executables[]`、`modelsDirs[]`、`models[]`、`projectors[]`（含 `file` 与已配对的 `modelId`）。
+## 侧边栏那个面板
 
----
+入口行不是注册在 DSH 的某个座位上的，而是直接注入到侧边栏「新会话」附近（用 `MutationObserver` 盯着，被别的插件挪动或重渲染之后会自己补回去），所以它和任务看板是同级并列的。
 
-## 侧边栏面板与数据面
+点开之后展开的是一个独立面板：它挂在会话列上，激活时会把会话列里原本的内容暂时藏起来，免得两块内容叠在一起。面板上依次是——插件作用的回显（一句话说明这个插件干嘛用）、当前状态、模型切换按钮、刷新按钮，以及终端输出区（带时间戳和 `stdout` / `stderr` / `system` / `terminal` 标签，支持关键字过滤、清屏、自动跟随）。
 
-入口行由 DOM 注入（锚定侧边栏「新会话」区域，`MutationObserver` 自愈），点击开关**自持面板**（`createRoot` 挂进会话列；激活时隐藏会话列其它子元素以避免重叠）。返回方式有三条：面板头部「**← 返回会话**」、点侧边栏任一身份行、按 **Esc**；与其它插件面板通过 `dsh-panel-activate` 事件互斥。
+面板和前端之间走的是同源 HTTP，没有用 DSH 内部的事件通道：
 
-面板内容：插件作用回显 → 状态行（phase / 模型 / pid / 上下文）→ 模型切换（带 👁 视觉标记，名称超 30 字符截断）→「刷新」→ 工具栏（优雅退出、清屏、跟随、过滤）→ 终端输出（时间戳 + 流别标签 `stdout` / `stderr` / `system` / `terminal`）。
-
-数据面（同源 HTTP；栅栏：回环套接字 + 回环 Host + 同源标记）：
-
-| 路由 | 方法 | 说明 |
+| 地址 | 方法 | 用途 |
 |---|---|---|
-| `/api/llamacpp-bridge/state` | GET | 快照：provider、插件作用、状态、模型清单、日志尾部 |
-| `/api/llamacpp-bridge/events` | GET | SSE：`snapshot` 首帧 + `log` 增量 + `status` 差分 + 15s 心跳 |
-| `/api/llamacpp-bridge/action` | POST | `{"action":"graceful-stop"}` → `{ok, steps}` |
+| `/api/llamacpp-bridge/state` | GET | 取一份当前快照：provider、插件作用、状态、模型清单、日志尾部 |
+| `/api/llamacpp-bridge/events` | GET | SSE 实时流：首帧快照，之后是日志增量、状态差分，15 秒一次心跳 |
+| `/api/llamacpp-bridge/action` | POST | 目前只有 `{"action":"graceful-stop"}`，返回执行步骤 |
 
-> 为什么不用 cordis 事件把 host 日志推给客户端：host→client 的 `remote-event` 帧是**白名单制**（由 `dsh-api-remotes` 拥有），自定义事件发不出去。因此改用官方 `webServer.register` 的 SSE 通道。
+这几个地址都做了同源栅栏（要求回环套接字、回环 Host、同源标记同时成立），外部页面拿不到。
 
----
+## 「优雅退出」到底做了什么
 
-## 优雅退出（Ctrl+C → Y）
+面板上那个按钮**不是强杀**，它模拟的是你在终端里按 Ctrl+C、再敲一个 Y 的整个过程。
 
-面板上的「优雅退出（Ctrl+C → Y）」**不是强杀**：
+插件启动 `llama-server` 时会尽量申请一个真正的终端（PTY），日志里会写一句 `已分配终端（支持 Ctrl+C / Y 交互）`。点下按钮之后，它先把 SIGINT 送到前台进程组——这和你在终端按 Ctrl+C 是同一件事；然后等 800 毫秒，让服务器把确认提示打出来，再把 `Y` 写进终端输入。接下来就是等它退出。
 
-1. **启动形态**：优先 `ctx.subprocess.spawnTerminal` 分配**真实 PTY**（日志：`已分配终端（支持 Ctrl+C / Y 交互）`）；终端不可用时回退管道模式（`stdin: 'pipe'`）。
-2. **Ctrl+C**：终端模式 `signalForeground('SIGINT')`——把 SIGINT 送到**前台进程组**，与在终端按 Ctrl+C 等价；管道模式 `process.kill(pid, 'SIGINT')`（仍是 SIGINT，**不是 SIGKILL**）。
-3. **Y 确认**：等 800ms 让服务器打印确认提示，再写 `Y\n`（终端 `write()` / 管道 stdin）。
-4. **升级顺序**：SIGINT → Y → 等 8s → 再补一次 SIGINT → 等 5s → **最后才**回退 `terminate()`（SIGTERM → grace → SIGKILL）。全程不直接强杀。
-5. 服务器打印的确认提示会原样进入面板日志（例如 `Press Y to confirm exit`）。
+没退才会往下升级：再补一次 Ctrl+C，再等 5 秒，最后一步才动用常规的 `terminate()`（先 SIGTERM，过了宽限期才是 SIGKILL）。整个流程不会一上来就强杀。申请不到终端的场合会退回管道模式，流程一样，只是信号改从进程号发、`Y` 写进 stdin。
 
-实测调用序列：`spawnTerminal → signalForeground:SIGINT → write:"Y\n"`，步骤回显 `["已发送 Ctrl+C","已发送 Y 确认","确认后已退出"]`。
+服务器自己打印的提示（比如 `Press Y to confirm exit`）会原样出现在面板日志里，所以整个过程你都看得见。
 
----
+## 它是怎么拼起来的
 
-## 架构
+这是一个标准的 DSH 双包插件：`package.json` 里的 `.` 指向 host 侧的 Node 入口，`./client` 指向浏览器里跑的那份 bundle，`cordis.patch.yml` 负责把它挂进 DSH 的组合。两边各管各的：
 
-| 文件 | 职责 |
-|---|---|
-| `src/host/index.ts` | 插件入口：环境探测、设置注册、目录仓库、服务器管理器、provider 注册、路由注册 |
-| `src/host/adapter.ts` | `llamacpp` 路由的 `LlmAdapter`：调用前 `ensure()`、DSH ↔ OpenAI SSE 双向翻译 |
-| `src/host/llama-server.ts` | `llama-server` 进程管理：终端/管道双模式、单模型与 router、就绪探测、优雅退出 |
-| `src/host/model-store.ts` | 目录扫描、mmproj 三级配对、指纹按需重扫、watcher 自愈 |
-| `src/host/discover.ts` | 可执行文件/模型目录探测，投影文件配对结果上报 |
-| `src/host/terminal-routes.ts` | 同源 HTTP/SSE 数据面（`state` / `events` / `action`） |
-| `src/host/log-hub.ts` | 环形日志总线（序号、时间戳、流别、订阅、增量读取） |
-| `src/host/config.ts` | 配置默认值、设置 schema、发现 schema |
-| `src/client/index.tsx` | 客户端入口：服务注入、设置页注册、挂载入口行与面板 |
-| `src/client/terminal-mount.ts` | DOM 注入入口行 + 自持面板（开合、返回路径、互斥、自愈） |
-| `src/client/terminal-panel.tsx` | 面板 UI：状态、模型切换、日志流、优雅退出、过滤 |
-| `src/client/setup.tsx` | 设置页：探测候选、目录浏览、mmproj 绑定、高级项 |
-| `src/client/ollama-icon.ts` | 线条终端图标（内联 SVG） |
-| `scripts/wrap-client.mjs` | 把 esbuild 的 CJS 产物包成 `window.__ModuleLoader__.load({...})` |
-| `scripts/link-dsh-types.mjs` | 从本机 DSH 安装链接类型包，供源码构建 |
+- `src/host/index.ts` —— 入口：探测环境、注册设置、建目录仓库、建进程管理器、注册 provider 路由和数据面
+- `src/host/adapter.ts` —— `llamacpp` 这条路由的适配器：调用前先 `ensure()`，以及 DSH 消息/流与 OpenAI 兼容 SSE 之间的互相翻译
+- `src/host/llama-server.ts` —— 进程管理：终端/管道两种启动方式、单模型与 router、就绪探测、优雅退出
+- `src/host/model-store.ts` —— 目录扫描、mmproj 三级配对、按指纹重扫、监听自愈
+- `src/host/discover.ts` —— 启动时寻找可执行文件和模型目录，报告投影文件配对情况
+- `src/host/terminal-routes.ts` —— 上面那三个 HTTP/SSE 地址
+- `src/host/log-hub.ts` —— 环形日志缓冲，供面板取增量
+- `src/host/config.ts` —— 默认值、设置 schema、发现 schema
+- `src/client/index.tsx` —— 客户端入口：注入服务、注册设置页、挂载入口行与面板
+- `src/client/terminal-mount.ts` —— 注入入口行和自持面板（开合、返回路径、互斥、自愈都在这里）
+- `src/client/terminal-panel.tsx` —— 面板界面与模型切换
+- `src/client/setup.tsx` —— 设置页
+- `scripts/wrap-client.mjs` —— 把 esbuild 的输出包成 DSH 模块加载器认识的样子
+- `scripts/link-dsh-types.mjs` —— 从本机 DSH 安装里链接类型包
 
----
+## 给后来改代码的人
 
-## 关键实现说明（踩坑记录）
+下面这些是实际踩过、并且真能让人浪费一整天的地方：
 
-以下都是实际踩过的坑，改代码前请先读：
+1. **cordis 的服务注入有两种相反的坑。** 访问一个没在 `inject` 里声明的服务，会直接抛 `cannot get property "X" without inject`；但如果把「当前作用域里还不存在」的服务写进导出的 `inject`，这个 fiber 就会一直等下去——插件**静默地不加载，什么错都不报**。稳妥的写法是：核心服务放导出的 `inject`，其余用 `ctx.inject([...], cb)` 局部等待。
+2. **`list` 类座位必须带 `id`**（`sidebar.footer.action`、`settings.section`、`conversation.view`），否则会报 `list slot ... requires options.id`。
+3. **别再用「DOM 覆盖层 + CSS 把原生会话藏起来」那套方案**，它会造成控件重叠、并且切不回会话。
+4. **拿原生 `conversation.view` 标签当入口是不可靠的**：会话壳只在一个会话打开、并且标签多于一个时才渲染标签，在首页点它会找不到目标，表现就是「点了没反应」。所以入口行改成自己持有面板。
+5. **`ctx.sessions` 是个 Service，快照在 `ctx.sessions.list`。** 传错的话，创建面板时会报 `getSnapshot is not a function`，整个座位被错误边界替换掉。
+6. **客户端 bundle 有固定契约**：必须调用 `window.__ModuleLoader__.load({ id: '<包名>', factory })`；react 是外部依赖，用 classic JSX 时要 `import * as React`（默认导入会被编译成 `require('react').default`，那是 undefined）。
+7. **esbuild 的参数**要用 `--jsx=transform`（0.24 已经不接受 `--jsx=classic`），也别漏掉 `--external:react-dom/client`。
+8. **类型尽量只依赖真正用到的那点结构。** 插件对消息块、设置作用域、子进程句柄这些东西只声明了最小的结构类型，这样 DSH 的类型修订不会轻易把编译弄挂。
+9. **pnpm 的构建门禁**：`ERR_PNPM_IGNORED_BUILDS`（fsevents、sharp 之类）会拦住任何 `dsh plugin add`，需要在 profile 的 `pnpm-workspace.yaml` 里用 `allowBuilds` 放行。
+10. **DSH 是单实例的**：再起一个 `dsh web` 会报 `task-board ledger is already owned by process <pid>`。
 
-1. **cordis 服务注入的两个相反陷阱**
-   - 访问未在 `inject` 声明的服务 → 抛 `cannot get property "X" without inject`；
-   - 把**当前作用域不可用**的服务写进导出的 `inject` → fiber **永久等待**，插件**静默不加载**（没有任何报错）。
-   - 正确做法：核心服务放导出的 `inject`，其余用 `ctx.inject([...], cb)` 局部等待。
-2. **`list` 类座位必须带 `id`**（`sidebar.footer.action` / `settings.section` / `conversation.view`），否则报 `list slot ... requires options.id`。
-3. **不要再回退到「DOM 覆盖层 + CSS 隐藏原生会话」方案**：会造成控件重叠与「切不回会话」。
-4. **原生 `conversation.view` 标签不适合当入口**：会话壳只在「已打开会话且标签数 > 1」时渲染标签，在首页/hero 点击会**找不到目标**（表现为「点不动」）。故改为入口行自持面板。
-5. **`ctx.sessions` 是 Service，快照在 `ctx.sessions.list`**（传 Service 会 `getSnapshot is not a function`，座位被错误边界替换成崩溃提示）。
-6. **客户端 bundle 契约**：必须 `window.__ModuleLoader__.load({ id: '<包名>', factory })`；react 是 external，classic JSX 需 `import * as React`（默认导入编译成 `require('react').default` = undefined）。
-7. **esbuild 参数**：用 `--jsx=transform`（`--jsx=classic` 在 0.24 报错），且必须 `--external:react-dom/client`。
-8. **类型跨版本**：插件只对 DSH 实际用到的接口做**最小结构类型**（消息块、设置作用域、子进程句柄 pid 等），避免 DSH 版本演进导致编译中断。
-9. **pnpm 构建门禁**：`ERR_PNPM_IGNORED_BUILDS`（fsevents/sharp 等）会阻断任何 `dsh plugin add`，需在 profile 的 `pnpm-workspace.yaml` 里用 `allowBuilds` 放行。
-10. **DSH 单实例**：再起一个 `dsh web` 会报 `task-board ledger is already owned by process <pid>`。
+## 遇到问题先看这里
 
----
+**侧边栏没有入口。** 先确认插件确实被加载了：浏览器控制台里看一眼 `/plugins/dsh-llamacpp-bridge/client.js` 是不是 200，如果是 404，说明当前这份 DSH 没有装载插件的客户端半包。另外记得装完要重启一次 `dsh web`，并把页面硬刷新。
 
-## 兼容性
+**控制台报 `bundle script ... failed to load`。** 这是页面缓存：强制刷新，或者干脆把整个窗口退掉（`Cmd+Q`）再打开。
 
-- **环境**：DSH `web` profile + macOS（Apple Silicon）+ `llama.cpp` 的 `llama-server`（单模型与 router 两种模式）。
-- **类型层**：对 DSH 接口采用最小结构类型，可在 DSH 类型修订之间继续编译；类型包由 `npm run link:dsh` 从本机安装链接。
-- **运行期**：host 入口必须能在 DSH profile 内解析（用 `dsh plugin add` 安装即可满足）。
-- **Windows**：未验证；终端原语与信号语义不同（`gracefulStop` 会自动回退管道模式）。
+**点了入口没反应。** 打开 F12 控制台，找以 `[llamacpp-bridge]` 或者 `slot entry crashed` 开头的行，那里会写清楚是哪一步出的问题。
 
----
+**模型列表不跟着目录变。** 面板里点一下「刷新」。如果还不对，看启动日志里 `scanned N model(s)` 那句提到的目录，是不是你现在正在用的那个。
 
-## 故障排查
+**视觉模型不能看图。** 看启动日志里有没有 `vision: <模型> ← <投影文件>`；如果某一行的位置写着 `unmatched mmproj: ...`，就到设置页把那个文件绑到对应的模型上。
 
-| 现象 | 处理 |
-|---|---|
-| 界面完全没有入口行与设置页 | 先确认客户端半包已被加载：`/plugins/dsh-llamacpp-bridge/client.js` 应返回 200；若为 404，说明当前 DSH 版本没有装载插件的客户端半包 |
-| 侧边栏没有入口行 | 确认插件已安装（`dsh plugin add` 已自动写入 `bundles`）→ **重启 host** → 浏览器 `Cmd/Ctrl+Shift+R` |
-| `bundle script /plugins/... failed to load` | 旧页面缓存：强制刷新，或 `Cmd+Q` 整退出后重开 |
-| 入口行点了没反应 | 打开 F12 Console，找 `[llamacpp-bridge]` 或 `slot entry crashed` 开头的行 |
-| 模型列表不随目录变化 | 面板点「刷新」；host 每次启动都会重扫（日志 `scanned N model(s) ... (startup rescan)`），运行中靠 `fs.watch` + 30s 兜底轮询 |
-| 视觉模型不生效 | 看 host 日志的 `vision: <模型> ← <投影文件>` 与 `unmatched mmproj: ...`；未配对的到 设置 → llama.cpp →「③ 视觉投影文件」手动绑定 |
-| 启动即失败 | 日志会打印实际执行参数与错误；确认 `executable` / `modelsDir` 正确（设置页可浏览选择） |
-| 端口被占用 | 改 `port`，或先停掉占用 8080 的进程 |
-| `ERR_PNPM_IGNORED_BUILDS` | 在 `~/.dsh/profiles/web/pnpm-workspace.yaml` 添加 `allowBuilds: { fsevents: true, sharp: true }` |
-| `ledger is already owned by process ...` | DSH 单实例限制：先关掉另一个 `dsh web` |
+**启动就失败。** 日志里会打印实际的命令行和错误原因，先确认 `executable` 和 `modelsDir` 指向的路径对不对。
 
----
+**端口被占用。** 改设置里的 `port`，或者先把占用 8080 的进程停掉。
 
-## 开发
+**`ERR_PNPM_IGNORED_BUILDS`。** 在 `~/.dsh/profiles/web/pnpm-workspace.yaml` 里加上 `allowBuilds: { fsevents: true, sharp: true }`。
+
+**`ledger is already owned by process ...`。** DSH 只允许跑一个实例，先把另一个 `dsh web` 关掉。
+
+## 如果你想自己改
 
 ```bash
 npm install          # devDependencies
-npm run link:dsh     # 链接本机 DSH 类型包（必须在 npm install 之后）
-npm run typecheck    # host + client 类型检查
-npm run build        # 构建 dist/（host 走 tsc，client 走 esbuild + 包装脚本）
+npm run link:dsh     # 链接本机 DSH 的类型包（必须在 npm install 之后）
+npm run typecheck    # host 与 client 的类型检查
+npm run build        # 构建 dist/
 npm run check        # typecheck + build
-npm pack             # 产出可安装的 tgz
+npm pack             # 打包成可安装的 tgz
 ```
 
-目录结构：
+`src/` 下面分成 host 和 client 两半，`src/shared.ts` 是两边共用的常量和小工具（provider id、路由前缀、名字截断之类）。改完记得重新 `npm pack`、用 `dsh plugin add` 覆盖安装，然后重启 host、硬刷新页面。
 
-```
-src/
-  shared.ts              共享常量与工具（provider id、路由前缀、名称截断等）
-  host/                  Node ESM 侧（provider、进程、目录、HTTP/SSE）
-  client/                浏览器 bundle 侧（入口行、面板、设置页）
-scripts/
-  wrap-client.mjs        esbuild 产物 → __ModuleLoader__ 包装
-  link-dsh-types.mjs     从本机 DSH 安装链接类型包
-dist/                    构建产物（仓库内已包含，便于直接安装）
-```
+## 还没做的
 
----
+原始需求里有一条是「长上下文时在对话里询问用户」，目前只能到设置页里改上下文长度——DSH 还没有合适的交互缝让插件在对话中插入提问，所以这条暂时留着没做。
 
 ## 许可证
 
